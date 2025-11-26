@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CyberSnake 2.3 - 最终优化版</title>
+    <title>CyberSnake 2.4 - 目标安全区修复版</title>
     <style>
         /* --- 基础样式 --- */
         body { 
@@ -226,7 +226,7 @@
             skillActive: false, palmOpenTimer: 0
         };
 
-        // ================= 3D 场景初始化 (已应用地图Bug修复) =================
+        // ================= 3D 场景初始化 =================
         const scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x050505, 0.035);
 
@@ -308,7 +308,14 @@
                 this.spawn(); scene.add(this.mesh);
             }
             spawn() {
-                this.mesh.position.set((Math.random()-0.5)*config.mapWidth, 0.5, (Math.random()-0.5)*config.mapHeight);
+                // *** 目标刷新安全区修复 (v2.4) ***
+                const safeWidth = config.mapWidth - 2; // 33
+                const safeHeight = config.mapHeight - 2; // 18
+                this.mesh.position.set(
+                    (Math.random()-0.5) * safeWidth, 
+                    0.5, 
+                    (Math.random()-0.5) * safeHeight
+                );
             }
             update() { this.mesh.rotation.y += 0.05; this.mesh.position.y = 0.5 + Math.sin(Date.now()*0.005)*0.2; }
         }
@@ -325,14 +332,14 @@
         function startGame() {
             if(!state.handDetected) { alert("未检测到手部！请确保允许摄像头权限并将手放入画面。"); return; }
             
-            // 关键修复：强制隐藏所有面板
+            // 强制隐藏所有面板
             document.getElementById('menu-panel').style.display = 'none';
             document.getElementById('game-over-panel').style.display = 'none';
             document.getElementById('hud').style.display = 'block';
             
             state.screen = 'PLAYING';
             state.score = 0;
-            state.palmOpenTimer = 0; // 重置计时器
+            state.palmOpenTimer = 0;
             document.getElementById('score-val').innerText = '0';
             
             if(snake) snake.destroy();
@@ -362,7 +369,7 @@
             vid.classList.toggle('hidden');
         }
 
-        // ================= MediaPipe & 摄像头逻辑 (已应用移动端性能优化) =================
+        // ================= MediaPipe & 摄像头逻辑 =================
         const videoElement = document.getElementById('input_video');
         const selectElement = document.getElementById('camera-select');
         let currentStream;
@@ -448,7 +455,6 @@
 
                 // 状态逻辑
                 if(state.screen === 'PLAYING') {
-                    // 隐藏进度条
                     progress.style.opacity = 0; 
                     cursor.style.borderColor = '#ff0055';
 
@@ -461,7 +467,7 @@
                     }
                 } 
                 else if (state.screen === 'GAMEOVER') {
-                    // 手掌检测 (判断指尖距离手腕的平均距离是否足够远)
+                    // 手掌检测 
                     const wrist = hand[0];
                     const tips = [hand[4], hand[8], hand[12], hand[16], hand[20]];
                     const avgDist = tips.reduce((acc, tip) => acc + Math.hypot(tip.x-wrist.x, tip.y-wrist.y), 0) / 5;
@@ -472,7 +478,7 @@
                         progress.style.opacity = 1;
                         progress.style.transform = `rotate(${state.palmOpenTimer * 10}deg)`;
                         
-                        if(state.palmOpenTimer > 40) { // 约1.3秒
+                        if(state.palmOpenTimer > 40) { 
                             startGame(); 
                         }
                     } else {
@@ -486,7 +492,7 @@
             }
         }
 
-        // ================= 动态摄像机视图修复 (v2.3) =================
+        // ================= 动态摄像机视图修复 =================
         function updateCameraView() {
             const aspectRatio = window.innerWidth / window.innerHeight;
             camera.aspect = aspectRatio;
@@ -495,11 +501,9 @@
             let targetY; 
 
             if (aspectRatio > 1.2) {
-                // 宽屏/桌面：保持相对靠近的视角
                 targetZ = 12;
                 targetY = CAMERA_BASE_Y;
             } else {
-                // 窄屏/手机竖屏：根据宽高比拉远摄像机，以完整显示地图宽度 (35)
                 targetZ = 12 + (1.2 - aspectRatio) * 25; 
                 targetY = CAMERA_BASE_Y + (1.2 - aspectRatio) * 5; 
             }
