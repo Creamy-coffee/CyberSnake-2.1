@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CyberSnake 2.1 - 完整优化版</title>
+    <style>
+        /* --- 基础样式 --- */
+        body { 
+            margin: 0; overflow: hidden; background-color: #050505; 
+            font-family: 'Segoe UI', sans-serif; user-select: none; 
+            touch-action: none;
+        }
+        canvas { display: block; }
+        
+        /* --- UI 层 --- */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 10;
+        }
+
+        /* --- 光标与进度条 --- */
+        #hand-cursor {
+            position: absolute; width: 20px; height: 20px;
+            border: 2px solid #ff0055; border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px #ff0055;
+            transition: border-color 0.2s; opacity: 0; z-index: 20;
+            pointer-events: none;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #cursor-progress {
+            position: absolute; width: 30px; height: 30px;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-top-color: #00ff00;
+            opacity: 0; transition: opacity 0.2s;
+        }
+
+        /* --- 摄像头预览 --- */
+        #input_video_container {
+            position: absolute; bottom: 10px; left: 10px; 
+            width: 120px; height: auto; aspect-ratio: 4/3;
+            border-radius: 10px; overflow: hidden;
+            border: 2px solid #00f3ff; opacity: 0.7; z-index: 5;
+            transform: scaleX(-1);
+            transition: opacity 0.5s, transform 0.5s;
+        }
+        #input_video_container.hidden {
+            opacity: 0; pointer-events: none;
+        }
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        /* --- 面板样式 --- */
+        .panel {
+            background: rgba(10, 15, 30, 0.9);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 243, 255, 0.4);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 0 40px rgba(0, 243, 255, 0.15);
+            pointer-events: auto;
+            max-width: 90%; width: 400px;
+        }
+        
+        h1 { color: #fff; margin: 0 0 10px; font-size: 2rem; text-shadow: 0 0 10px #00f3ff; }
+        p { color: #aaa; margin-bottom: 20px; font-size: 0.9rem; }
+        
+        /* --- 控件 --- */
+        select {
+            background: #000; color: #fff; border: 1px solid #00f3ff;
+            padding: 8px; border-radius: 5px; margin-bottom: 15px; width: 100%;
+        }
+
+        .skin-selector { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; }
+        .skin-btn { 
+            width: 50px; height: 50px; border-radius: 10px; cursor: pointer; 
+            border: 2px solid rgba(255,255,255,0.2); transition: 0.3s;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px; background: #222;
+        }
+        .skin-btn.active { border-color: #00f3ff; box-shadow: 0 0 15px #00f3ff; transform: scale(1.1); }
+
+        .btn {
+            background: linear-gradient(90deg, #00f3ff, #0066ff);
+            border: none; padding: 12px 30px; color: #fff; font-weight: bold; border-radius: 30px;
+            cursor: pointer; font-size: 16px; margin-top: 10px; width: 100%;
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+        .btn:active { transform: scale(0.98); }
+
+        /* --- 顶部控制栏 --- */
+        .ctrl-btn {
+            position: absolute; top: 10px; right: 10px; z-index: 20;
+            display: flex; gap: 10px; pointer-events: auto;
+        }
+        .icon-btn {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            color: white; width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; font-size: 18px;
+            transition: background 0.2s;
+        }
+        .icon-btn:hover { background: rgba(255,255,255,0.3); }
+        .icon-btn.active { background: #00f3ff; color: #000; border-color: #00f3ff; }
+
+        /* --- HUD --- */
+        #hud { position: absolute; top: 10px; left: 10px; color: #fff; display: none; }
+        .score-box { font-size: 24px; font-weight: bold; text-shadow: 0 0 5px #00f3ff; }
+        .gesture-hint { font-size: 12px; color: #ff0055; margin-top: 5px; display: none; }
+        .show-hint { display: block; animation: flash 1s infinite; }
+        @keyframes flash { 0%{opacity:0.2;} 50%{opacity:1;} 100%{opacity:0.2;} }
+
+        /* --- Loading --- */
+        #loader {
+            position: absolute; top:0; left:0; width:100%; height:100%; background: #000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 100; color: #00f3ff;
+        }
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="loader"><h2>系统初始化中...</h2></div>
+
+    <div id="input_video_container">
+        <video id="input_video" autoplay playsinline muted></video>
+    </div>
+
+    <div id="hand-cursor">
+        <div id="cursor-progress"></div>
+    </div>
+
+    <div class="ctrl-btn">
+        <button class="icon-btn" onclick="toggleCamera()" title="显示/隐藏摄像头">👁️</button>
+        <button class="icon-btn" onclick="toggleSound()" id="sound-btn" title="开关声音">🔇</button>
+        <button class="icon-btn" onclick="toggleFullScreen()" title="全屏">⛶</button>
+    </div>
+
+    <div id="ui-layer">
+        <div id="menu-panel" class="panel" style="display:none;">
+            <h1>CYBER SNAKE</h1>
+            <p>👆 食指控制方向 | ✋ 双手释放技能</p>
+            
+            <label style="color: #fff; font-size: 12px; display: block; text-align: left;">选择摄像头：</label>
+            <select id="camera-select"><option>正在获取...</option></select>
+
+            <label style="color: #fff; font-size: 12px; display: block; text-align: left; margin-top:10px;">选择机体：</label>
+            <div class="skin-selector">
+                <div class="skin-btn active" onclick="selectSkin('cube', this)">⬛</div>
+                <div class="skin-btn" onclick="selectSkin('sphere', this)">●</div>
+                <div class="skin-btn" onclick="selectSkin('torus', this)">◎</div>
+            </div>
+
+            <button class="btn" onclick="startGame()">启动引擎</button>
+        </div>
+
+        <div id="game-over-panel" class="panel" style="display: none;">
+            <h1 style="color: #ff0055;">SYSTEM FAILURE</h1>
+            <p id="final-score">得分: 0</p>
+            <p style="color: #00f3ff; font-weight: bold; border: 1px dashed #00f3ff; padding: 10px; border-radius: 10px;">
+                ✋ 对摄像头张开手掌<br>Hold住 1 秒重启
+            </p>
+            <button class="btn btn-secondary" onclick="resetToMenu()" style="background:transparent; border:1px solid #fff; font-size:12px;">返回菜单</button>
+        </div>
+    </div>
+
+    <div id="hud">
+        <div class="score-box">SCORE: <span id="score-val">0</span></div>
+        <div class="gesture-hint" id="skill-hint">⚡ 技能激活：极速无敌 ⚡</div>
+    </div>
+
+    <script>
+        // ================= 音频系统 =================
+        class SoundSystem {
+            constructor() { this.ctx = null; this.enabled = false; }
+            init() { if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+            toggle() {
+                this.enabled = !this.enabled;
+                if(this.enabled) { this.init(); if(this.ctx.state === 'suspended') this.ctx.resume(); this.playBGM(); } 
+                else { this.stopBGM(); }
+                return this.enabled;
+            }
+            playTone(freq, type, duration) {
+                if(!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+                osc.type = type; osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.start(); osc.stop(this.ctx.currentTime + duration);
+            }
+            playEat() { this.playTone(600, 'sine', 0.1); setTimeout(() => this.playTone(800, 'sine', 0.1), 50); }
+            playCrash() { this.playTone(100, 'sawtooth', 0.5); }
+            playBGM() {
+                if(!this.bgmOsc) {
+                    this.bgmOsc = this.ctx.createOscillator(); this.bgmGain = this.ctx.createGain();
+                    this.bgmOsc.type = 'triangle'; this.bgmOsc.frequency.value = 50;
+                    this.bgmGain.gain.value = 0.05;
+                    this.bgmOsc.connect(this.bgmGain); this.bgmGain.connect(this.ctx.destination);
+                    this.bgmOsc.start();
+                }
+            }
+            stopBGM() { if(this.bgmOsc) { this.bgmOsc.stop(); this.bgmOsc = null; } }
+        }
+        const audioSys = new SoundSystem();
+
+        // ================= 游戏核心 =================
+        const config = { mapWidth: 35, mapHeight: 20, speed: 0.15, skillSpeed: 0.35 };
+        let state = {
+            screen: 'MENU',
+            score: 0,
+            skinType: 'cube',
+            handPos: new THREE.Vector3(0, 0, 0), 
+            handDetected: false,
+            skillActive: false,
+            palmOpenTimer: 0
+        };
+
+        // Scene
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.035);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 18, 12); camera.lookAt(0, 0, 2);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        // Post-Processing
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(new THREE.RenderPass(scene, camera));
+        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.1; bloomPass.strength = 1.0; bloomPass.radius = 0.5;
+        composer.addPass(bloomPass);
+
+        // Objects
+        const grid = new THREE.GridHelper(50, 50, 0x00f3ff, 0x111111); scene.add(grid);
+        const borderLine = new THREE.LineSegments(
+            new THREE.EdgesGeometry(new THREE.BoxGeometry(config.mapWidth + 1, 1, config.mapHeight + 1)),
+            new THREE.LineBasicMaterial({ color: 0x333333 })
+        ); scene.add(borderLine);
+        scene.add(new THREE.AmbientLight(0x404040, 2));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8); dirLight.position.set(10, 20, 10); scene.add(dirLight);
+
+        // Snake Class
+        class Snake {
+            constructor(type) {
+                this.segments = []; this.type = type; this.baseColor = 0x00f3ff;
+                if(type === 'cube') this.geo = new THREE.BoxGeometry(1, 1, 1);
+                else if(type === 'sphere') this.geo = new THREE.SphereGeometry(0.6, 16, 16);
+                else if(type === 'torus') this.geo = new THREE.TorusGeometry(0.5, 0.2, 8, 16);
+                this.mat = new THREE.MeshStandardMaterial({ color: this.baseColor, emissive: this.baseColor, emissiveIntensity: 0.5, roughness: 0.2, metalness: 0.8 });
+                this.addSegment(new THREE.Vector3(0, 0.5, 0));
+                for(let i=0; i<4; i++) this.addSegment(new THREE.Vector3(0, 0.5, i+1));
+            }
+            addSegment(pos) {
+                const mesh = new THREE.Mesh(this.geo, this.mat.clone());
+                mesh.position.copy(pos); if(this.type === 'torus') mesh.rotation.x = Math.PI / 2;
+                scene.add(mesh); this.segments.push(mesh);
+            }
+            update(target) {
+                const head = this.segments[0];
+                const speed = state.skillActive ? config.skillSpeed : config.speed;
+                if(state.skillActive) { head.material.emissive.setHex(0xff0055); head.material.color.setHex(0xff0055); }
+                else { head.material.emissive.setHex(this.baseColor); head.material.color.setHex(this.baseColor); }
+                
+                head.position.lerp(target, speed);
+                head.position.x = THREE.MathUtils.clamp(head.position.x, -config.mapWidth/2, config.mapWidth/2);
+                head.position.z = THREE.MathUtils.clamp(head.position.z, -config.mapHeight/2, config.mapHeight/2);
+
+                for(let i=1; i<this.segments.length; i++) {
+                    const curr = this.segments[i], prev = this.segments[i-1];
+                    const dist = curr.position.distanceTo(prev.position);
+                    if(dist > 0.8) {
+                        const dir = new THREE.Vector3().subVectors(prev.position, curr.position).normalize();
+                        curr.position.add(dir.multiplyScalar(dist - 0.8));
+                        curr.lookAt(prev.position);
+                    }
+                }
+            }
+            checkCollision() {
+                if(state.skillActive) return false;
+                const head = this.segments[0];
+                for(let i=5; i<this.segments.length; i++) {
+                    if(head.position.distanceTo(this.segments[i].position) < 0.8) return true;
+                }
+                return false;
+            }
+            destroy() { this.segments.forEach(m => scene.remove(m)); this.segments = []; }
+        }
+
+        class Food {
+            constructor() {
+                this.mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0xffaa00, emissiveIntensity: 1 }));
+                this.spawn(); scene.add(this.mesh);
+            }
+            spawn() {
+                this.mesh.position.set((Math.random()-0.5)*config.mapWidth, 0.5, (Math.random()-0.5)*config.mapHeight);
+            }
+            update() { this.mesh.rotation.y += 0.05; this.mesh.position.y = 0.5 + Math.sin(Date.now()*0.005)*0.2; }
+        }
+
+        let snake, food;
+
+        // ================= 逻辑控制 =================
+        function selectSkin(type, btn) {
+            state.skinType = type;
+            document.querySelectorAll('.skin-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        function startGame() {
+            if(!state.handDetected) { alert("未检测到手部！"); return; }
+            
+            // 关键修复：强制隐藏所有面板
+            document.getElementById('menu-panel').style.display = 'none';
+            document.getElementById('game-over-panel').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            
+            state.screen = 'PLAYING';
+            state.score = 0;
+            state.palmOpenTimer = 0; // 重置计时器
+            document.getElementById('score-val').innerText = '0';
+            
+            if(snake) snake.destroy();
+            if(food) scene.remove(food.mesh);
+            snake = new Snake(state.skinType);
+            food = new Food();
+            
+            if(audioSys.enabled && audioSys.ctx.state === 'suspended') audioSys.ctx.resume();
+        }
+
+        function gameOver() {
+            state.screen = 'GAMEOVER';
+            audioSys.playCrash();
+            document.getElementById('hud').style.display = 'none';
+            document.getElementById('game-over-panel').style.display = 'block';
+            document.getElementById('final-score').innerText = "得分: " + state.score;
+        }
+
+        function resetToMenu() {
+            document.getElementById('game-over-panel').style.display = 'none';
+            document.getElementById('menu-panel').style.display = 'block';
+            state.screen = 'MENU';
+        }
+
+        function toggleCamera() {
+            const vid = document.getElementById('input_video_container');
+            vid.classList.toggle('hidden');
+        }
+
+        // ================= MediaPipe =================
+        const videoElement = document.getElementById('input_video');
+        const selectElement = document.getElementById('camera-select');
+        let currentStream;
+
+        async function getCameras() {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            selectElement.innerHTML = '';
+            videoDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Camera ${selectElement.length + 1}`;
+                selectElement.appendChild(option);
+            });
+            selectElement.onchange = () => startCamera(selectElement.value);
+        }
+
+        async function startCamera(deviceId) {
+            if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 640 }, height: { ideal: 480 } }
+                });
+                videoElement.srcObject = currentStream;
+            } catch (e) { console.error(e); }
+        }
+
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        hands.onResults(onHandsResults);
+
+        async function detectLoop() {
+            if (videoElement.readyState >= 2) await hands.send({image: videoElement});
+            requestAnimationFrame(detectLoop);
+        }
+
+        navigator.mediaDevices.getUserMedia({video: true}).then(async () => {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('menu-panel').style.display = 'block';
+            await getCameras(); startCamera(); detectLoop();
+        });
+
+        function onHandsResults(results) {
+            const cursor = document.getElementById('hand-cursor');
+            const progress = document.getElementById('cursor-progress');
+            
+            state.handDetected = false;
+            state.skillActive = false;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                state.handDetected = true;
+                const hand = results.multiHandLandmarks[0];
+                const indexTip = hand[8];
+                
+                // 光标跟随
+                const screenX = (1 - indexTip.x) * window.innerWidth;
+                const screenY = indexTip.y * window.innerHeight;
+                cursor.style.opacity = 1;
+                cursor.style.left = screenX + 'px';
+                cursor.style.top = screenY + 'px';
+
+                // 游戏坐标映射
+                const effectiveRange = 0.8; 
+                const offset = (1 - effectiveRange) / 2;
+                const targetX = (((1 - indexTip.x - offset) / effectiveRange) - 0.5) * config.mapWidth;
+                const targetZ = (((indexTip.y - offset) / effectiveRange) - 0.5) * config.mapHeight;
+                state.handPos.set(targetX, 0.5, targetZ);
+
+                // 状态逻辑
+                if(state.screen === 'PLAYING') {
+                    // 隐藏进度条
+                    progress.style.opacity = 0; 
+                    cursor.style.borderColor = '#ff0055';
+
+                    // 双手技能
+                    if (results.multiHandLandmarks.length > 1) {
+                        state.skillActive = true;
+                        document.getElementById('skill-hint').classList.add('show-hint');
+                    } else {
+                        document.getElementById('skill-hint').classList.remove('show-hint');
+                    }
+                } 
+                else if (state.screen === 'GAMEOVER') {
+                    // 手掌检测 (简单算法：指尖全部高于指根)
+                    const tips = [hand[4], hand[8], hand[12], hand[16], hand[20]];
+                    // 这里判断是否“张开”：简单的y轴判断（所有指尖都在手腕上方，注意坐标系y向下增大）
+                    // 为了通用性，改用指尖距离手腕的平均距离是否足够远
+                    const wrist = hand[0];
+                    const avgDist = tips.reduce((acc, tip) => acc + Math.hypot(tip.x-wrist.x, tip.y-wrist.y), 0) / 5;
+                    
+                    // 0.2 是一个经验阈值，手掌张开时指尖离手腕较远
+                    if(avgDist > 0.25) {
+                        state.palmOpenTimer++;
+                        cursor.style.borderColor = '#00ff00';
+                        progress.style.opacity = 1;
+                        progress.style.transform = `rotate(${state.palmOpenTimer * 10}deg)`;
+                        
+                        if(state.palmOpenTimer > 40) { // 约1.3秒
+                            startGame(); // 触发开始
+                        }
+                    } else {
+                        state.palmOpenTimer = 0;
+                        cursor.style.borderColor = '#ff0055';
+                        progress.style.opacity = 0;
+                    }
+                }
+            } else {
+                cursor.style.opacity = 0;
+            }
+        }
+
+        // ================= 渲染 =================
+        function animate() {
+            requestAnimationFrame(animate);
+            if (state.screen === 'PLAYING' && snake) {
+                if(state.handDetected) snake.update(state.handPos);
+                if(food) food.update();
+                if(snake.segments[0].position.distanceTo(food.mesh.position) < 1.2) {
+                    audioSys.playEat();
+                    state.score += 10;
+                    document.getElementById('score-val').innerText = state.score;
+                    scene.remove(food.mesh); food.spawn(); scene.add(food.mesh);
+                    snake.addSegment(snake.segments[snake.segments.length-1].position.clone());
+                    bloomPass.strength = 1.0 + Math.min(1, state.score * 0.05);
+                }
+                if(snake.checkCollision()) gameOver();
+            }
+            composer.render();
+        }
+        animate();
+
+        // 辅助
+        function toggleSound() {
+            const enabled = audioSys.toggle();
+            document.getElementById('sound-btn').innerText = enabled ? '🔊' : '🔇';
+        }
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+            else document.exitFullscreen();
+        }
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>
